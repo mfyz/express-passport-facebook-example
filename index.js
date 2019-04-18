@@ -11,19 +11,20 @@ const FacebookStrategy = require('passport-facebook').Strategy
 const dbUtil = require('./dbUtil')
 
 const PORT = process.env.PORT || 4009
-const FACEBOOK_APP_ID = ''
-const FACEBOOK_APP_SECRET = ''
+const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID
+const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET
 
-// express app
+// ----------- Express -----------
 const app = express()
-app.set('view engine', 'pug')
+app.use(session({ secret: 'awesome auth', resave: true, saveUninitialized: true }))
 app.use(cookieParser())
-app.use(express.static('public'))
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({ extended: true }))
-app.use(session({ secret: 'awesome auth', resave: false, saveUninitialized: true }))
+app.use(express.static('public'))
+app.set('view engine', 'pug')
 
-// security
+
+// ----------- Security -----------
 const csrf = csurf({ cookie: true })
 app.use(helmet())
 app.use(csrf)
@@ -32,7 +33,8 @@ app.use(function (err, req, res, next) {
 	res.status(403).render('error', { message: 'Invalid form submission!' })
 })
 
-// passport
+
+// ----------- Passport -----------
 app.use(passport.initialize())
 app.use(passport.session())
 const passportConfig = { failureRedirect: '/login' }
@@ -59,20 +61,29 @@ passport.use(new LocalStrategy((username, password, done) => {
 		})
 }))
 
+const fbCallbackUrl = "https://ef66241c.ngrok.io/facebook/callback"
 passport.use(new FacebookStrategy({
-	clientID: FACEBOOK_APP_ID,
-	clientSecret: FACEBOOK_APP_SECRET,
-	callbackURL: "http://www.example.com/auth/facebook/callback"
-},
-function(accessToken, refreshToken, profile, done) {
-	console.log('------> fb auth completed');
-	console.log(accessToken, refreshToken, profile);
-	// User.findOrCreate(..., function(err, user) {
-	// 	if (err) { return done(err); }
-	// 	done(null, user);
-	// });
-}
-));
+		clientID: FACEBOOK_APP_ID,
+		clientSecret: FACEBOOK_APP_SECRET,
+		callbackURL: fbCallbackUrl
+	},
+	function(accessToken, refreshToken, profile, done) {
+		if (accessToken && Object.keys(profile).length > 0) {
+			// console.log(accessToken, refreshToken, profile)
+			dbUtil.getUserByFbid(profile.id)
+				.then(user => {
+					done(null, { accessToken, profile, user })
+				})
+				.catch(err => {
+					// console.log('err', err)
+					done(err, null)
+				})
+		}
+		else {
+			done('FB auth failed!', null)
+		}
+	}
+))
 
 passport.serializeUser((user, cb) => {
 	cb(null, user.id)
@@ -80,19 +91,12 @@ passport.serializeUser((user, cb) => {
 
 passport.deserializeUser((id, cb) => {
 	dbUtil.getUserById(id)
-		.then((user) => {
-			cb(null, user)
-		})
-		.catch((err) => {
-			cb(err, null)
-		})
+		.then(user => cb(null, user))
+		.catch(err => cb(err, null))
 })
 
-// App start
 
-app.listen(PORT, () => console.log(`App listening on port ${PORT}!`))
-
-/* Routes */
+// ----------- Routes -----------
 
 app.get('/', (req, res) => {
 	res.render('index')
@@ -119,9 +123,8 @@ app.all('/login', (req, res, next) => {
 		}
 	})
 		.then(user => new Promise((resolve, reject) => {
-			req.login(user, err => { // save authentication
+			req.login(user, err => {
 				if (err) return reject(err)
-				console.log('auth completed - redirecting to member area')
 				return res.redirect('/member')
 			})
 		}))
@@ -140,7 +143,6 @@ app.all('/login', (req, res, next) => {
 app.all('/register', (req, res) => {
 	new Promise(async (resolve, reject) => {
 		if (Object.keys(req.body).length > 0) {
-			// console.log(req.body)
 			if (
 				!(req.body.email && req.body.email.length > 5)
 				|| !(req.body.username && req.body.username.length > 1)
@@ -216,3 +218,54 @@ app.get('/logout', authRequired, (req, res) => {
 	req.logout()
 	res.redirect('/')
 })
+
+app.get('/auth/facebook', passport.authenticate('facebook'))
+
+app.get('/facebook/callback', (req, res, next) => {
+	passport.authenticate('facebook', (err, response) => {
+		if (err) {
+			// console.log(err)
+			res.render('error', { message: err.message })
+		}
+		// Fb logged in, if user account matched...
+		else if (response && response.user) {
+			req.login(response.user, err => { // save authentication
+				if (err) return res.render('error', { message: err.message })
+				return res.redirect('/member')
+			})
+		}
+		// No account, register route...
+		else {
+			if (req.session.registerAfterFBAuth) {
+				dbUtil.createUserRecord({
+					fbid: response.profile.id,
+					fbtoken: response.accessToken,
+				}, true)
+					.then((user) => {
+						req.login(user, err => { // save authentication
+							if (err) return res.render('error', { message: err.message })
+							return res.redirect('/member')
+						})
+						res.redirect('/register-success')
+					})
+					.catch(e => res.render('error', { message: e.message }))				
+			}
+			else {
+				res.redirect('/register-facebook')
+			}
+		}
+	})(req, res, next)
+})
+
+app.get('/register-facebook', (req, res) => {
+	res.render('register-facebook')
+})
+
+app.get('/register-facebook/confirm', (req, res) => {
+	req.session.registerAfterFBAuth = true
+	res.redirect('/auth/facebook')
+})
+
+// ----------- App start -----------
+
+app.listen(PORT, () => console.log(`App listening on port ${PORT}!`))
