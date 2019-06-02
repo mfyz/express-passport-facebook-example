@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+	"dev": "nodemon index.js",
+	"public": "ssh -R mfyz-express-passport-facebook-example:80:localhost:4009 serveo.net",
+	"bgrok": "ngrok http 4009"
   },
   "author": "",
   "license": "ISC",

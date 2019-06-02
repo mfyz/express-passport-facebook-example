@@ -13,6 +13,7 @@ const dbUtil = require('./dbUtil')
 const PORT = process.env.PORT || 4009
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET
+const FACEBOOK_CALLBACK_URL = process.env.FACEBOOK_CALLBACK_URL
 
 // ----------- Express -----------
 const app = express()
@@ -61,11 +62,10 @@ passport.use(new LocalStrategy((username, password, done) => {
 		})
 }))
 
-const fbCallbackUrl = "https://ef66241c.ngrok.io/facebook/callback"
 passport.use(new FacebookStrategy({
 		clientID: FACEBOOK_APP_ID,
 		clientSecret: FACEBOOK_APP_SECRET,
-		callbackURL: fbCallbackUrl
+		callbackURL: FACEBOOK_CALLBACK_URL
 	},
 	function(accessToken, refreshToken, profile, done) {
 		if (accessToken && Object.keys(profile).length > 0) {
@@ -78,6 +78,39 @@ passport.use(new FacebookStrategy({
 					// console.log('err', err)
 					done(err, null)
 				})
+			
+			/*
+				TODO: Handle linking scenarios:
+
+					check if there is an active session user that is already authenticated
+						check if the fbid is not linked to another account
+							link fbid to the session user's record
+							no need to create logged in session because it's already there
+							[scenario 1]
+						else
+							show an error message saying the fb account
+							the user logged in is linked to another user.
+							or a confirmation to unlink the fb account from the other
+							user and link it to the current user.
+							[scenario 2]
+					else
+						check if common user identifiers like email address is
+						used by another account in the db.
+						if there is another account with same email address
+							show a message to ask user to login to their email account
+							to link fb account and email account
+							if user clicks login to link accounts
+								after successful email login, link accounts
+								[scenario 3]
+							else
+								create new account using fb profile
+								and create session for the new account
+								[scenario 4]
+						else
+							create new account using fb profile
+							and create session for the new account
+							[scenario 5]
+			*/
 		}
 		else {
 			done('FB auth failed!', null)
